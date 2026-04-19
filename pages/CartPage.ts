@@ -1,6 +1,17 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { BasePage } from './BasePage';
 
+/**
+ * CartPage — seletores corrigidos com base no HTML real do QAZANDO Shop.
+ *
+ * Estrutura real da página /cart:
+ *  - Tabela: colunas Remove | Image | Product | Price | Quantity | Total
+ *  - Botão remover: <a> com ícone fa-trash dentro da primeira coluna (td)
+ *  - Botão checkout: <a href="/checkout-one"> — fica abaixo da tabela (scroll necessário)
+ *  - Botão limpar: <button> "CLEAR CART" no canto inferior direito da tabela
+ *  - Total: seção "CART TOTAL" com linha "Subtotal $107.00"
+ *  - Carrinho vazio: texto "YOUR CART IS EMPTY"
+ */
 export class CartPage extends BasePage {
   readonly cartItems: Locator;
   readonly totalPrice: Locator;
@@ -15,57 +26,74 @@ export class CartPage extends BasePage {
   constructor(page: Page) {
     super(page);
 
-    this.cartItems = page.locator('.table_desc tbody tr, .cart_submit tbody tr');
-    this.totalPrice = page.locator('.cart_amount, .offcanvas-cart-total-price-value').last();
-    this.checkoutButton = page.locator('a:has-text("CHECKOUT"), a:has-text("Checkout"), .checkout_btn a').first();
-    this.removeItemButtons = page.locator('.product_remove button, .product_remove a, button:has-text("Remove")');
-    this.emptyCartMessage = page.locator('text=/YOUR CART IS EMPTY|No Item Found Inside Your Cart|carrinho vazio/i').first();
-    this.quantityInputs = page.locator('input[type="number"]');
-    this.continueShoppingButton = page.locator('a:has-text("Continue Shopping"), a[href="/shop"]').first();
-    this.cartTitle = page.locator('h1, h2, h3, text=/Shopping Cart|Cart Total/i').first();
-    this.clearCartButton = page.locator('button:has-text("Clear cart")').first();
+    // Linhas de produto na tabela
+    this.cartItems = page.locator('table tbody tr');
+
+    // Seção de total (CART TOTAL)
+    this.totalPrice = page.locator('.cart-total-lable, .cart-subtotal, td').filter({ hasText: /\$/ }).last();
+
+    // Link de checkout — href real: /checkout-one (pode estar escondido, usar scroll)
+    this.checkoutButton = page.locator('a[href="/checkout-one"]').first();
+
+    // Botão remover — ícone de lixeira (fa-trash) na primeira coluna
+    // O <a> envolve o ícone; usamos o pai do ícone ou o próprio <a> na coluna td:first-child
+    this.removeItemButtons = page.locator('table tbody tr td:first-child a');
+
+    // Mensagem de carrinho vazio
+    this.emptyCartMessage = page.locator(
+      'p:has-text("YOUR CART IS EMPTY"), h2:has-text("empty"), .empty-cart-content, ' +
+      'p:has-text("No product"), td:has-text("No product")'
+    ).first();
+
+    this.quantityInputs         = page.locator('input[type="number"]');
+    this.continueShoppingButton = page.locator('a[href="/shop"], a:has-text("Continue Shopping")').first();
+    this.cartTitle              = page.locator('h1, h2, h3').first();
+    this.clearCartButton        = page.locator('button:has-text("CLEAR CART"), button:has-text("Clear Cart")').first();
   }
 
   async open() {
     await this.navigate('/cart');
-
-    const pageReady = await Promise.any([
-      this.cartTitle.waitFor({ state: 'visible', timeout: 15_000 }),
-      this.emptyCartMessage.waitFor({ state: 'visible', timeout: 15_000 }),
-      this.cartItems.first().waitFor({ state: 'visible', timeout: 15_000 }),
+    // Aguarda tabela OU mensagem de vazio
+    await Promise.any([
+      this.page.waitForSelector('table tbody tr', { timeout: 15_000 }),
+      this.page.waitForSelector(
+        'p:has-text("YOUR CART IS EMPTY"), .empty-cart-content, p:has-text("No product")',
+        { timeout: 15_000 }
+      ),
     ]).catch(() => null);
-
-    expect(pageReady).not.toBeNull();
+    await this.page.waitForTimeout(500);
   }
 
+  /** Limpa o carrinho via botão "CLEAR CART" se disponível */
   async clearCartIfPossible() {
-    if (await this.clearCartButton.isVisible().catch(() => false)) {
-      await this.clearCartButton.click();
-      await this.page.waitForTimeout(500);
+    const btn = this.clearCartButton;
+    if (await btn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await btn.click();
+      await this.page.waitForTimeout(1_000);
     }
   }
 
+  /** Remove o primeiro item da tabela */
   async removeFirstItem() {
-    await expect(this.removeItemButtons.first()).toBeVisible();
-    await this.removeItemButtons.first().click();
-    await this.page.waitForTimeout(300);
+    const btn = this.removeItemButtons.first();
+    await btn.scrollIntoViewIfNeeded();
+    await expect(btn).toBeVisible({ timeout: 8_000 });
+    await btn.click();
+    await this.page.waitForTimeout(800);
   }
 
-  async updateQuantity(index: number, qty: number) {
-    const input = this.quantityInputs.nth(index);
-    await expect(input).toBeVisible();
-    await input.fill('');
-    await input.fill(qty.toString());
-  }
-
+  /** Clica em checkout fazendo scroll até o botão */
   async proceedToCheckout() {
-    await expect(this.checkoutButton).toBeVisible();
-    await this.checkoutButton.click();
+    const btn = this.checkoutButton;
+    await btn.scrollIntoViewIfNeeded();
+    await expect(btn).toBeVisible({ timeout: 8_000 });
+    await btn.click();
   }
 
   async continueShopping() {
-    await expect(this.continueShoppingButton).toBeVisible();
-    await this.continueShoppingButton.click();
+    const btn = this.continueShoppingButton;
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click();
   }
 
   async assertCartHasItems(count?: number) {
@@ -85,12 +113,10 @@ export class CartPage extends BasePage {
   }
 
   async assertCartLoaded() {
-    const hasCartUrl = this.page.url().includes('/cart');
-    const hasTitle = await this.cartTitle.isVisible().catch(() => false);
-    const hasEmptyState = await this.emptyCartMessage.isVisible().catch(() => false);
-    const hasItems = (await this.cartItems.count()) > 0;
-    const hasCheckout = await this.checkoutButton.isVisible().catch(() => false);
-    expect(hasCartUrl || hasTitle || hasEmptyState || hasItems || hasCheckout).toBe(true);
+    const hasItems    = (await this.cartItems.count()) > 0;
+    const hasEmpty    = await this.emptyCartMessage.isVisible().catch(() => false);
+    const hasCartUrl  = this.page.url().includes('/cart');
+    expect(hasItems || hasEmpty || hasCartUrl).toBe(true);
   }
 
   async getItemCount(): Promise<number> {

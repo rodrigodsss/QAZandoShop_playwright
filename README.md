@@ -403,6 +403,6 @@ Desenvolvido com 💚 para portfólio de QA Automation
 
 ⭐ Se este projeto foi útil, deixe uma estrela no repositório!
 
-**[🔗 LinkedIn](https://linkedin.com/in/seu-perfil)** • **[🐙 GitHub](https://github.com/seu-usuario)**
+**[🔗 LinkedIn](https://www.linkedin.com/in/rodrigo-sousa-qa/)** • **[🐙 GitHub](https://github.com/rodrigodsss)**
 
 </div>
